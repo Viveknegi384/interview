@@ -13,10 +13,13 @@ import os
 import ctypes
 import ctypes.wintypes
 
-from config import AUDIO_QUEUE_MAXSIZE, TRANSCRIPT_QUEUE_MAXSIZE, ANSWER_QUEUE_MAXSIZE
+from config import AUDIO_QUEUE_MAXSIZE, TRANSCRIPT_QUEUE_MAXSIZE, ANSWER_QUEUE_MAXSIZE, CAPTURE_SYSTEM_PROMPT
 from audio_capture import AudioCaptureThread
 from transcriber import TranscriberThread
 from ai_client import AIClientThread
+from screen_capture import capture_and_extract, is_tesseract_available
+import requests
+import json
 
 try:
     import keyboard
@@ -91,6 +94,7 @@ class InterviewAssistantApp:
         self._transcribe_trigger = threading.Event()
         self._active_audio_thread = None
         self._window_visible = True
+        self._capture_texts = []   # Accumulates OCR text from multiple screenshots
 
         # ── Build UI ─────────────────────────────────────
         self._build_ui()
@@ -324,6 +328,39 @@ class InterviewAssistantApp:
             cursor="hand2", command=self._clear_all,
         ).pack(side=tk.LEFT)
 
+        tk.Button(
+            btns, text="📸 Add Screenshot",
+            font=("Segoe UI", 9, "bold"),
+            bg="#0e7490", fg="white",
+            activebackground="#0c6280", activeforeground="white",
+            relief=tk.FLAT, padx=10, pady=4,
+            cursor="hand2", command=self._add_screenshot,
+        ).pack(side=tk.LEFT, padx=(8, 0))
+
+        self._capture_count_var = tk.StringVar(value="")
+        tk.Label(
+            btns, textvariable=self._capture_count_var,
+            font=("Segoe UI", 9), bg=BG, fg="#22d3ee",
+        ).pack(side=tk.LEFT, padx=(4, 0))
+
+        tk.Button(
+            btns, text="🔍 Solve Captures",
+            font=("Segoe UI", 9, "bold"),
+            bg="#7c3aed", fg="white",
+            activebackground="#5b21b6", activeforeground="white",
+            relief=tk.FLAT, padx=10, pady=4,
+            cursor="hand2", command=self._solve_captures,
+        ).pack(side=tk.LEFT, padx=(4, 0))
+
+        tk.Button(
+            btns, text="📸❌ Clear",
+            font=("Segoe UI", 9),
+            bg="#374151", fg="#f87171",
+            activebackground="#4b5563", activeforeground="#f87171",
+            relief=tk.FLAT, padx=6, pady=4,
+            cursor="hand2", command=self._clear_captures,
+        ).pack(side=tk.LEFT, padx=(4, 0))
+
         # ── Status Bar ────────────────────────────────────
         self.status_var = tk.StringVar(value="⏳ Loading Whisper model...")
         tk.Label(
@@ -474,6 +511,102 @@ class InterviewAssistantApp:
             box.delete("1.0", tk.END)
             box.config(state=tk.DISABLED)
         self._set_status("✅ Cleared.")
+
+    def _add_screenshot(self):
+        """Capture current screen, OCR it, add text to the capture buffer."""
+        if not is_tesseract_available():
+            messagebox.showerror("Tesseract Not Found",
+                "Install from: https://github.com/UB-Mannheim/tesseract/wiki")
+            return
+
+        n = len(self._capture_texts) + 1
+        self._set_status(f"📸 Capturing screenshot {n} in 2 sec... (scroll question first)")
+        self.root.withdraw()
+        self._window_visible = False
+
+        def do_add():
+            import time
+            time.sleep(2)
+            try:
+                self._set_status_safe(f"🔍 Reading screenshot {n}...")
+                text = capture_and_extract(monitor_index=1)
+            except Exception as e:
+                self._show_error_safe(f"Capture failed: {e}")
+                self.root.after(0, self._do_toggle_visibility)
+                return
+
+            self.root.after(0, self._do_toggle_visibility)
+
+            if not text or len(text.strip()) < 15:
+                self._show_error_safe("OCR found no text. Make sure question is visible.")
+                return
+
+            self._capture_texts.append(text)
+            count = len(self._capture_texts)
+            self.root.after(0, lambda c=count: self._capture_count_var.set(f"({c} shot{'s' if c > 1 else ''})"))
+            self._update_transcript_display(
+                f"[{count} screenshot(s) captured — click 🔍 Solve Captures when done]\n\n"
+                + "\n---\n".join(t[:300] + "..." for t in self._capture_texts)
+            )
+            self._set_status_safe(f"✅ Screenshot {count} added! Scroll & add more, or click 🔍 Solve Captures.")
+            logger.info(f"Screenshot {count} OCR'd: {len(text)} chars")
+
+        threading.Thread(target=do_add, daemon=True, name="AddScreenshotThread").start()
+
+    def _solve_captures(self):
+        """Combine all captured OCR text and send to Ollama for a C++ solution."""
+        if not self._capture_texts:
+            messagebox.showwarning("No Screenshots", "Click '📸 Add Screenshot' first (scroll through the question).")
+            return
+
+        combined = "\n\n--- NEXT SCREENSHOT ---\n\n".join(self._capture_texts)
+        self._set_status(f"🤖 Solving question from {len(self._capture_texts)} screenshot(s)...")
+        logger.info(f"Sending {len(combined)} chars from {len(self._capture_texts)} captures to Ollama.")
+
+        def do_solve():
+            from config import OLLAMA_BASE_URL, OLLAMA_MODEL, OLLAMA_NUM_CTX
+            payload = {
+                "model": OLLAMA_MODEL,
+                "prompt": (
+                    f"Below is text captured from {len(self._capture_texts)} screenshot(s) of a question. "
+                    f"Some parts may overlap or repeat — intelligently extract the full question and solve it.\n\n"
+                    f"{combined}"
+                ),
+                "system": CAPTURE_SYSTEM_PROMPT,
+                "stream": True,
+                "options": {
+                    "num_predict": 800,    # More tokens for full C++ code
+                    "num_ctx": OLLAMA_NUM_CTX,
+                    "temperature": 0.1,   # Low temp = precise code
+                },
+            }
+            try:
+                resp = requests.post(OLLAMA_BASE_URL, json=payload, stream=True, timeout=180)
+                resp.raise_for_status()
+                chunks = []
+                for line in resp.iter_lines():
+                    if line:
+                        data = json.loads(line.decode("utf-8"))
+                        chunks.append(data.get("response", ""))
+                        if data.get("done"):
+                            break
+                answer = "".join(chunks).strip()
+                if answer:
+                    self.root.after(0, lambda a=answer: self._display_answer(a))
+                    self._set_status_safe("✅ Solution ready! (C++)")
+                else:
+                    self._show_error_safe("Ollama returned empty response.")
+            except Exception as e:
+                self._show_error_safe(f"Ollama error: {e}")
+
+        threading.Thread(target=do_solve, daemon=True, name="SolveCapturesThread").start()
+
+    def _clear_captures(self):
+        """Clear all accumulated screenshots."""
+        self._capture_texts.clear()
+        self._capture_count_var.set("")
+        self._update_transcript_display("")
+        self._set_status("🗑 Screenshots cleared. Ready for new question.")
 
     # ══════════════════════════════════════════════════════
     #  Thread-safe callbacks

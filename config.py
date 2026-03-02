@@ -68,3 +68,26 @@ ANSWER_QUEUE_MAXSIZE = 20
 
 # --- Temporary file path for audio ---
 TEMP_WAV_PATH = "temp_recording.wav"
+
+# --- Screen Capture Settings ---
+TESSERACT_PATH = r"C:\Program Files\Tesseract-OCR\tesseract.exe"
+
+CAPTURE_SYSTEM_PROMPT = """You are an expert problem solver. The text below was captured from multiple screenshots of a question screen — it may have OCR noise, repeated UI elements, or partial overlap between captures. Intelligently extract the actual question and solve it.
+
+CODING QUESTION (e.g. LeetCode, HackerRank, competitive programming format):
+→ Write the COMPLETE, OPTIMIZED solution in C++.
+→ Include: approach explanation (2-3 lines), full working C++ code with comments, time complexity, space complexity.
+→ Use STL where appropriate. Make the code contest-ready.
+
+MCQ / APTITUDE / LOGICAL REASONING:
+→ State the answer first: "Answer: [option]"
+→ Then explain why in 2-3 sentences.
+
+THEORY / CONCEPTUAL QUESTION:
+→ Give a clear, concise explanation with a code example if relevant (in C++).
+
+IMPORTANT:
+- Ignore repeated UI text, headers, navigation elements — focus only on the actual question.
+- If the same text appears multiple times (overlap), treat it as one.
+- Start your answer immediately. No preamble.
+"""
