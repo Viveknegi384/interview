@@ -1,0 +1,29 @@
+# Virtual environment
+venv/
+env/
+.env
+
+# API Keys — NEVER commit these
+config_secrets.py
+
+# Python cache
+__pycache__/
+*.py[cod]
+*.pyo
+
+# Whisper model cache
+*.cache
+
+# Temp audio files
+temp_recording.wav
+
+# Logs
+*.log
+interview_assistant.log
+
+# Resume (personal data)
+resume.txt
+
+# OS files
+.DS_Store
+Thumbs.db
