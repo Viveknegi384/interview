@@ -15,7 +15,7 @@ import ctypes
 from config import (
     AUDIO_QUEUE_MAXSIZE, TRANSCRIPT_QUEUE_MAXSIZE, ANSWER_QUEUE_MAXSIZE,
     GROQ_CAPTURE_PROMPT, GROQ_CODING_MODEL, GROQ_CODING_MAX_TOKENS,
-    GROQ_KEY_FILE,
+    GROQ_KEY_FILE, LISTEN_HOTKEY,
 )
 from audio_capture import AudioCaptureThread
 from transcriber import TranscriberThread
@@ -147,7 +147,12 @@ class InterviewAssistantApp:
             keyboard.add_hotkey("ctrl+\\", self._toggle_visibility, suppress=False)
             logger.info("✅ Hotkey: Ctrl+\\ to show/hide window.")
         except Exception as e:
-            logger.warning(f"Hotkey failed: {e}")
+            logger.warning(f"Show/hide hotkey failed: {e}")
+        try:
+            keyboard.add_hotkey(LISTEN_HOTKEY, self._toggle_listen, suppress=True)
+            logger.info(f"✅ Hotkey: {LISTEN_HOTKEY.upper()} to start/stop listening.")
+        except Exception as e:
+            logger.warning(f"Listen hotkey failed: {e}")
 
     def _toggle_visibility(self):
         self.root.after(0, self._do_toggle_visibility)
@@ -196,7 +201,12 @@ class InterviewAssistantApp:
         tk.Button(self.root, text="⚙ Key", font=("Segoe UI", 8),
                   bg="#374151", fg=FG_DIM, relief=tk.FLAT, padx=5, pady=2,
                   cursor="hand2", command=self._prompt_api_key
-                  ).place(relx=1.0, rely=0.0, anchor="ne", x=-50, y=8)
+                  ).place(relx=1.0, rely=0.0, anchor="ne", x=-100, y=8)
+
+        tk.Button(self.root, text="☀ Opacity", font=("Segoe UI", 8),
+                  bg="#374151", fg="#93c5fd", relief=tk.FLAT, padx=5, pady=2,
+                  cursor="hand2", command=self._open_settings
+                  ).place(relx=1.0, rely=0.0, anchor="ne", x=-155, y=8)
 
         tk.Button(self.root, text="✕ Quit", font=("Segoe UI", 8),
                   bg="#374151", fg=FG_DIM, relief=tk.FLAT, padx=5, pady=2,
@@ -249,6 +259,9 @@ class InterviewAssistantApp:
         self.recording_indicator = tk.Label(
             btn_frame, text="", font=("Segoe UI", 9), bg=BG, fg=ACCENT_ON)
         self.recording_indicator.pack(pady=(3, 0))
+
+        tk.Label(btn_frame, text=f"⌨ {LISTEN_HOTKEY.upper()} to start/stop",
+                 font=("Segoe UI", 8), bg=BG, fg="#475569").pack(pady=(1, 0))
 
         # ── Transcript ───────────────────────────────────
         tk.Label(self.root, text="📝 Transcript:",
@@ -616,6 +629,63 @@ class InterviewAssistantApp:
             self._set_status(f"❌ {msg}"),
             messagebox.showerror("Error", msg),
         ))
+
+    # ══════════════════════════════════════════════════════
+    #  Settings (Transparency)
+    # ══════════════════════════════════════════════════════
+    def _open_settings(self):
+        """Open a small settings popup with a transparency/opacity slider."""
+        if hasattr(self, "_settings_win") and self._settings_win.winfo_exists():
+            self._settings_win.lift()
+            return
+
+        BG    = "#1e1e2e"
+        PANEL = "#2a2a3e"
+        FG    = "#e2e8f0"
+        FG_DIM = "#94a3b8"
+
+        win = tk.Toplevel(self.root)
+        win.title("Settings")
+        win.geometry("320x140")
+        win.resizable(False, False)
+        win.configure(bg=BG)
+        win.attributes('-topmost', True)
+        win.attributes('-toolwindow', True)
+        self._settings_win = win
+
+        tk.Label(win, text="⚙  Settings",
+                 font=("Segoe UI", 11, "bold"), bg=BG, fg=FG
+                 ).pack(pady=(14, 4))
+
+        row = tk.Frame(win, bg=BG)
+        row.pack(fill=tk.X, padx=20, pady=4)
+
+        tk.Label(row, text="☀ Opacity:",
+                 font=("Segoe UI", 9), bg=BG, fg=FG_DIM
+                 ).pack(side=tk.LEFT)
+
+        # Current alpha → percentage label
+        current_alpha = self.root.attributes('-alpha')
+        pct_var = tk.StringVar(value=f"{int(current_alpha * 100)}%")
+        pct_label = tk.Label(row, textvariable=pct_var,
+                             font=("Segoe UI", 9, "bold"), bg=BG, fg="#93c5fd", width=5)
+        pct_label.pack(side=tk.RIGHT)
+
+        def on_slider(val):
+            alpha = int(float(val)) / 100
+            self.root.attributes('-alpha', alpha)
+            pct_var.set(f"{int(float(val))}%")
+
+        slider = tk.Scale(
+            win, from_=10, to=100, orient=tk.HORIZONTAL,
+            command=on_slider, length=260,
+            bg=PANEL, fg=FG, troughcolor="#374151",
+            highlightthickness=0, sliderrelief=tk.FLAT,
+            activebackground="#7c3aed", font=("Segoe UI", 8),
+            showvalue=False,
+        )
+        slider.set(int(current_alpha * 100))
+        slider.pack(padx=20, pady=(0, 10))
 
     # ══════════════════════════════════════════════════════
     #  Shutdown

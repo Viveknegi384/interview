@@ -85,3 +85,8 @@ TESSERACT_PATH = r"C:\Program Files\Tesseract-OCR\tesseract.exe"
 
 # --- API key storage file ---
 GROQ_KEY_FILE = "groq_key.txt"
+
+# --- Hotkeys ---
+# Ctrl+\      → show/hide window  (existing)
+# Ctrl+Alt+L  → start/stop listening  (safe: not used by Chrome/Firefox/Edge/VS Code)
+LISTEN_HOTKEY = "ctrl+alt+l"
