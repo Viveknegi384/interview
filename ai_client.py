@@ -1,130 +1,115 @@
 # ============================================================
-# ai_client.py — Thread 3: Ollama AI answer generation (speed-optimised)
+# ai_client.py — Groq API client thread for interview answers
 # ============================================================
 
 import threading
 import queue
-import requests
-import json
 import logging
+from groq import Groq
 
 from config import (
-    OLLAMA_BASE_URL, OLLAMA_MODEL, OLLAMA_NUM_PREDICT, OLLAMA_NUM_CTX,
-    OLLAMA_SYSTEM_PROMPT,
+    GROQ_API_KEY, GROQ_KEY_FILE,
+    GROQ_INTERVIEW_MODEL, GROQ_INTERVIEW_MAX_TOKENS,
+    GROQ_TEMPERATURE, GROQ_SYSTEM_PROMPT,
 )
 
 logger = logging.getLogger(__name__)
 
 
-class AIClientThread(threading.Thread):
-    """
-    Watches transcript_queue. Sends each question to local Ollama.
-    Streams the response and puts final answer into answer_queue.
-    Supports dynamic resume context injected via set_resume().
-    """
+def load_api_key() -> str:
+    """Load Groq API key from file or config."""
+    import os
+    if GROQ_API_KEY.strip():
+        return GROQ_API_KEY.strip()
+    try:
+        if os.path.exists(GROQ_KEY_FILE):
+            key = open(GROQ_KEY_FILE, "r").read().strip()
+            if key:
+                return key
+    except Exception:
+        pass
+    return ""
 
-    def __init__(
-        self,
-        transcript_queue: queue.Queue,
-        answer_queue: queue.Queue,
-        status_callback=None,
-        error_callback=None,
-    ):
+
+class AIClientThread(threading.Thread):
+
+    def __init__(self, transcript_queue: queue.Queue, answer_queue: queue.Queue,
+                 status_callback, error_callback):
         super().__init__(daemon=True, name="AIClientThread")
         self.transcript_queue = transcript_queue
-        self.answer_queue = answer_queue
-        self.status_callback = status_callback
-        self.error_callback = error_callback
-        self._shutdown = threading.Event()
-        self._resume_text = ""
-        self._resume_lock = threading.Lock()
+        self.answer_queue     = answer_queue
+        self._status  = status_callback
+        self._error   = error_callback
+        self._resume  = ""
+        self._running = True
+        self._client  = None
+        self._init_client()
 
-    def set_resume(self, resume_text: str):
-        """Thread-safe update of resume context."""
-        with self._resume_lock:
-            self._resume_text = resume_text.strip()
-        logger.info(f"Resume context updated ({len(self._resume_text)} chars)")
+    def _init_client(self):
+        key = load_api_key()
+        if key:
+            self._client = Groq(api_key=key)
+            logger.info("Groq client initialised.")
+        else:
+            logger.warning("Groq API key not set — AI answers disabled until key is provided.")
 
-    def _build_system_prompt(self) -> str:
-        with self._resume_lock:
-            resume = self._resume_text
-        if resume:
-            return OLLAMA_SYSTEM_PROMPT + f"\n\nCANDIDATE PROFILE (use for personal questions ONLY):\n{resume}"
-        return OLLAMA_SYSTEM_PROMPT
+    def set_api_key(self, key: str):
+        """Hot-update the API key."""
+        self._client = Groq(api_key=key)
+        # Save to file
+        try:
+            with open(GROQ_KEY_FILE, "w") as f:
+                f.write(key.strip())
+        except Exception as e:
+            logger.warning(f"Could not save API key: {e}")
+        logger.info("Groq API key updated.")
+
+    def set_resume(self, text: str):
+        self._resume = text.strip()
+        logger.info(f"Resume context updated ({len(self._resume)} chars)")
+
+    def _build_prompt(self, question: str) -> str:
+        system = GROQ_SYSTEM_PROMPT
+        if self._resume:
+            system += f"\n\nCANDIDATE PROFILE:\n{self._resume}"
+        return system
 
     def run(self):
         logger.info("AIClientThread: Started. Waiting for transcripts...")
-        while not self._shutdown.is_set():
+        while self._running:
             try:
-                transcript = self.transcript_queue.get(timeout=0.5)
+                question = self.transcript_queue.get(timeout=1.0)
             except queue.Empty:
                 continue
-            logger.info(f"AIClientThread: Got question → {transcript}")
-            self._ask_ollama(transcript)
 
-    def _ask_ollama(self, question: str):
-        if self.status_callback:
-            self.status_callback("🤖 Asking Ollama AI...")
+            if not question:
+                continue
 
-        payload = {
-            "model": OLLAMA_MODEL,
-            "prompt": question,
-            "system": self._build_system_prompt(),
-            "stream": True,
-            "options": {
-                "num_predict": OLLAMA_NUM_PREDICT,
-                "num_ctx": OLLAMA_NUM_CTX,
-                "temperature": 0.4,
-                "top_p": 0.9,
-                "repeat_penalty": 1.1,
-            },
-        }
+            logger.info(f"AIClientThread: Got question → {question[:80]}")
+            self._status(f"🤖 Thinking... ({GROQ_INTERVIEW_MODEL})")
 
-        try:
-            response = requests.post(
-                OLLAMA_BASE_URL,
-                json=payload,
-                stream=True,
-                timeout=60,
-            )
-            response.raise_for_status()
-        except requests.exceptions.ConnectionError:
-            msg = "Cannot connect to Ollama. Open a new terminal and run: ollama serve"
-            logger.error(msg)
-            if self.error_callback:
-                self.error_callback(msg)
-            return
-        except Exception as e:
-            msg = f"Ollama request failed: {e}"
-            logger.error(msg)
-            if self.error_callback:
-                self.error_callback(msg)
-            return
+            if not self._client:
+                self._error("Groq API key not set. Please enter it in Settings.")
+                continue
 
-        full_answer = []
-        try:
-            for line in response.iter_lines():
-                if self._shutdown.is_set():
-                    break
-                if line:
-                    chunk = json.loads(line.decode("utf-8"))
-                    full_answer.append(chunk.get("response", ""))
-                    if chunk.get("done", False):
-                        break
-        except Exception as e:
-            logger.error(f"Stream read error: {e}")
-            if self.error_callback:
-                self.error_callback(f"AI stream error: {e}")
-            return
-
-        answer_text = "".join(full_answer).strip()
-        if answer_text:
-            logger.info(f"AIClientThread: Answer received ({len(answer_text)} chars)")
-            self.answer_queue.put(answer_text)
-        else:
-            logger.warning("AIClientThread: Empty answer from Ollama.")
-            if self.error_callback:
-                self.error_callback("Ollama returned empty response. Is the model loaded?")
+            try:
+                response = self._client.chat.completions.create(
+                    model=GROQ_INTERVIEW_MODEL,
+                    messages=[
+                        {"role": "system",  "content": self._build_prompt(question)},
+                        {"role": "user",    "content": question},
+                    ],
+                    max_tokens=GROQ_INTERVIEW_MAX_TOKENS,
+                    temperature=GROQ_TEMPERATURE,
+                    stream=False,
+                )
+                answer = response.choices[0].message.content.strip()
+                logger.info(f"AIClientThread: Answer received ({len(answer)} chars)")
+                self.answer_queue.put(answer)
+                self._status("✅ Done — click START LISTENING for the next question.")
+            except Exception as e:
+                logger.error(f"Groq API error: {e}")
+                self._error(f"Groq API error: {e}")
 
     def shutdown(self):
-        self._shutdown.set()
+        self._running = False

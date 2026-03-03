@@ -5,6 +5,7 @@ env/
 
 # API Keys — NEVER commit these
 config_secrets.py
+groq_key.txt
 
 # Python cache
 __pycache__/
