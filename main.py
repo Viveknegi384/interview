@@ -147,7 +147,12 @@ class InterviewAssistantApp:
             keyboard.add_hotkey("ctrl+\\", self._toggle_visibility, suppress=False)
             logger.info("✅ Hotkey: Ctrl+\\ to show/hide window.")
         except Exception as e:
-            logger.warning(f"Show/hide hotkey failed: {e}")
+            logger.warning(f"Show/hide hotkey (Ctrl+\\) failed: {e}")
+        try:
+            keyboard.add_hotkey("ctrl+shift", self._toggle_visibility, suppress=False)
+            logger.info("✅ Hotkey: Ctrl+Shift to show/hide window (alternate).")
+        except Exception as e:
+            logger.warning(f"Show/hide hotkey (Ctrl+Shift) failed: {e}")
         try:
             keyboard.add_hotkey(LISTEN_HOTKEY, self._toggle_listen, suppress=True)
             logger.info(f"✅ Hotkey: {LISTEN_HOTKEY.upper()} to start/stop listening.")
@@ -194,7 +199,7 @@ class InterviewAssistantApp:
                  font=("Segoe UI", 15, "bold"), bg=BG, fg=FG).pack(side=tk.LEFT)
         tk.Label(header, text="🔒 Stealth · Groq Powered",
                  font=("Segoe UI", 8), bg=BG, fg="#4ade80").pack(side=tk.LEFT, padx=(10, 0), pady=(5, 0))
-        tk.Label(header, text="Ctrl+\\ → show/hide",
+        tk.Label(header, text="Ctrl+\\ or Ctrl+Shift → show/hide",
                  font=("Segoe UI", 8), bg=BG, fg=FG_DIM).pack(side=tk.RIGHT)
 
         # Settings + Quit buttons
@@ -296,6 +301,12 @@ class InterviewAssistantApp:
                   bg="#374151", fg=FG, activebackground="#4b5563",
                   relief=tk.FLAT, padx=10, pady=4, cursor="hand2",
                   command=self._clear_all).pack(side=tk.LEFT)
+
+        self._paste_btn = tk.Button(btns, text="📋 Paste", font=("Segoe UI", 9),
+                  bg="#1e40af", fg="white", activebackground="#1e3a8a",
+                  relief=tk.FLAT, padx=10, pady=4, cursor="hand2",
+                  command=self._paste_to_answer)
+        self._paste_btn.pack(side=tk.LEFT, padx=(8, 0))
 
         tk.Button(btns, text="📸 Add Screenshot", font=("Segoe UI", 9, "bold"),
                   bg="#0e7490", fg="white", activebackground="#0c6280",
@@ -599,7 +610,29 @@ class InterviewAssistantApp:
         self.answer_box.insert(tk.END, answer)
         self.answer_box.see(tk.END)
         self.answer_box.config(state=tk.DISABLED)
+        # Hide paste button — AI answer is now showing
+        self._paste_btn.pack_forget()
         logger.info("Answer displayed.")
+
+    def _paste_to_answer(self):
+        """Paste clipboard text into the answer box for reading only (no AI processing)."""
+        try:
+            text = self.root.clipboard_get()
+        except tk.TclError:
+            text = ""
+        if not text or not text.strip():
+            return
+        # Only paste if answer box is currently empty
+        current = self.answer_box.get("1.0", tk.END).strip()
+        if current:
+            return
+        self.answer_box.config(state=tk.NORMAL)
+        self.answer_box.delete("1.0", tk.END)
+        self.answer_box.insert(tk.END, text)
+        self.answer_box.see("1.0")
+        self.answer_box.config(state=tk.DISABLED)  # read-only immediately
+        self._paste_btn.pack_forget()               # hide button after paste
+        self._set_status("📋 Text pasted for reading. Click 🗑 Clear to remove it.")
 
     def _update_transcript_display(self, text: str):
         self.transcript_box.config(state=tk.NORMAL)
@@ -612,6 +645,8 @@ class InterviewAssistantApp:
             box.config(state=tk.NORMAL)
             box.delete("1.0", tk.END)
             box.config(state=tk.DISABLED)
+        # Show paste button again — answer box is empty
+        self._paste_btn.pack(side=tk.LEFT, padx=(8, 0))
         self._set_status("✅ Cleared.")
 
     # ══════════════════════════════════════════════════════
