@@ -5,12 +5,16 @@
 import threading
 import queue
 import logging
+import re
 from groq import Groq
 
 from config import (
-    GROQ_API_KEY, GROQ_KEY_FILE,
-    GROQ_INTERVIEW_MODEL, GROQ_INTERVIEW_MAX_TOKENS,
-    GROQ_TEMPERATURE, GROQ_SYSTEM_PROMPT,
+    GROQ_API_KEY,
+    GROQ_KEY_FILE,
+    GROQ_INTERVIEW_MODEL,
+    GROQ_INTERVIEW_MAX_TOKENS,
+    GROQ_TEMPERATURE,
+    GROQ_SYSTEM_PROMPT,
 )
 
 logger = logging.getLogger(__name__)
@@ -19,6 +23,7 @@ logger = logging.getLogger(__name__)
 def load_api_key() -> str:
     """Load Groq API key from file or config."""
     import os
+
     if GROQ_API_KEY.strip():
         return GROQ_API_KEY.strip()
     try:
@@ -33,16 +38,21 @@ def load_api_key() -> str:
 
 class AIClientThread(threading.Thread):
 
-    def __init__(self, transcript_queue: queue.Queue, answer_queue: queue.Queue,
-                 status_callback, error_callback):
+    def __init__(
+        self,
+        transcript_queue: queue.Queue,
+        answer_queue: queue.Queue,
+        status_callback,
+        error_callback,
+    ):
         super().__init__(daemon=True, name="AIClientThread")
         self.transcript_queue = transcript_queue
-        self.answer_queue     = answer_queue
-        self._status  = status_callback
-        self._error   = error_callback
-        self._resume  = ""
+        self.answer_queue = answer_queue
+        self._status = status_callback
+        self._error = error_callback
+        self._resume = ""
         self._running = True
-        self._client  = None
+        self._client = None
         self._init_client()
 
     def _init_client(self):
@@ -51,7 +61,9 @@ class AIClientThread(threading.Thread):
             self._client = Groq(api_key=key)
             logger.info("Groq client initialised.")
         else:
-            logger.warning("Groq API key not set — AI answers disabled until key is provided.")
+            logger.warning(
+                "Groq API key not set — AI answers disabled until key is provided."
+            )
 
     def set_api_key(self, key: str):
         """Hot-update the API key."""
@@ -73,6 +85,36 @@ class AIClientThread(threading.Thread):
         if self._resume:
             system += f"\n\nCANDIDATE PROFILE:\n{self._resume}"
         return system
+
+    def _format_short_answer(self, answer: str) -> str:
+        """Normalize model output to concise 4-5 lines in paragraph style."""
+        text = (answer or "").strip()
+        if not text:
+            return ""
+
+        # Keep meaningful lines only.
+        raw_lines = [ln.strip() for ln in text.splitlines() if ln.strip()]
+        if not raw_lines:
+            raw_lines = [text]
+
+        # If model returned one long paragraph, split into sentence-like chunks.
+        if len(raw_lines) == 1:
+            chunks = re.split(r"(?<=[.!?])\s+", raw_lines[0])
+            raw_lines = [c.strip() for c in chunks if c.strip()]
+
+        # Clean bullets/numbering to avoid duplicated markers.
+        cleaned = [
+            re.sub(r"^(?:[-*•]+|\d+[.)])\s*", "", ln).strip() for ln in raw_lines
+        ]
+        cleaned = [ln for ln in cleaned if ln]
+
+        # Keep at most 5 lines and prefer at least 4 when possible.
+        final_lines = cleaned[:5]
+        if len(final_lines) < 4 and len(cleaned) > 5:
+            final_lines = cleaned[:4]
+
+        # Paragraph style: plain lines without bullets or numbering.
+        return "\n".join(final_lines)
 
     def run(self):
         logger.info("AIClientThread: Started. Waiting for transcripts...")
@@ -96,14 +138,14 @@ class AIClientThread(threading.Thread):
                 response = self._client.chat.completions.create(
                     model=GROQ_INTERVIEW_MODEL,
                     messages=[
-                        {"role": "system",  "content": self._build_prompt(question)},
-                        {"role": "user",    "content": question},
+                        {"role": "system", "content": self._build_prompt(question)},
+                        {"role": "user", "content": question},
                     ],
                     max_tokens=GROQ_INTERVIEW_MAX_TOKENS,
                     temperature=GROQ_TEMPERATURE,
                     stream=False,
                 )
-                answer = response.choices[0].message.content.strip()
+                answer = self._format_short_answer(response.choices[0].message.content)
                 logger.info(f"AIClientThread: Answer received ({len(answer)} chars)")
                 self.answer_queue.put(answer)
                 self._status("✅ Done — click START LISTENING for the next question.")

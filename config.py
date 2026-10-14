@@ -3,15 +3,24 @@
 # ============================================================
 
 # --- Groq API Settings ---
-GROQ_API_KEY = ""                      # Set here OR enter in the app on first launch
-GROQ_INTERVIEW_MODEL = "llama-3.1-8b-instant"   # Fast — for voice interview Q&A
-GROQ_CODING_MODEL    = "groq/compound"           # Groq's best — Llama 4 Scout + GPT-OSS 120B + code execution
-GROQ_INTERVIEW_MAX_TOKENS = 400
-GROQ_CODING_MAX_TOKENS    = 3000   # Qwen3 uses tokens for thinking + answer
+GROQ_API_KEY = ""  # Set here OR enter in the app on first launch
+GROQ_INTERVIEW_MODEL = "llama-3.1-8b-instant"  # Fast — for voice interview Q&A
+GROQ_CODING_MODEL = (
+    "groq/compound"  # Groq's best — Llama 4 Scout + GPT-OSS 120B + code execution
+)
+GROQ_INTERVIEW_MAX_TOKENS = 180
+GROQ_CODING_MAX_TOKENS = 3000  # Qwen3 uses tokens for thinking + answer
 GROQ_TEMPERATURE = 0.3
 
 # --- Interview System Prompt ---
 GROQ_SYSTEM_PROMPT = """You are answering interview questions on behalf of the candidate.
+
+OUTPUT STYLE (MANDATORY):
+- Keep the answer very short and to the point.
+- Write in paragraph form, not bullet points or numbering.
+- Keep it within 4-5 lines total.
+- Each line should carry one clear idea and flow naturally.
+- No intro, no outro, no filler.
 
 STEP 1 — CLASSIFY the question:
 A) PERSONAL/BEHAVIORAL: asks about YOU ("your strengths", "tell me about yourself", "why should we hire you", "weakness", "your experience", "your projects")
@@ -22,12 +31,12 @@ STEP 2 — ANSWER:
 
 If TYPE A (PERSONAL): Speak as the candidate in FIRST PERSON using CANDIDATE PROFILE.
 → "I...", "My strength is...", "I built..."
-→ 3-4 sentences MAX. Short, natural, speakable.
+→ 4-5 short lines MAX. Natural and speakable.
 
-If TYPE B (COMPANY): Give factual company knowledge. 4-5 sentences. End with why you want to join.
+If TYPE B (COMPANY): Give factual company knowledge in paragraph style. 4-5 short lines. End with why you want to join.
 
 If TYPE C (GENERAL/TECHNICAL): Answer factually. Do NOT use the resume. Just answer the question directly.
-→ 3-5 sentences.
+→ 4-5 short lines in paragraph style.
 
 RULES: No preamble. Start immediately. Never say "The candidate..." or "As an AI...".
 """
@@ -53,12 +62,12 @@ Time: O(...) | Space: O(...)
 """
 
 # --- Whisper (faster-whisper) Settings ---
-WHISPER_MODEL_SIZE   = "small"
-WHISPER_DEVICE       = "cpu"
+WHISPER_MODEL_SIZE = "small"
+WHISPER_DEVICE = "cpu"
 WHISPER_COMPUTE_TYPE = "int8"
-WHISPER_LANGUAGE     = "en"
-WHISPER_BEAM_SIZE    = 10
-WHISPER_VAD_FILTER   = True
+WHISPER_LANGUAGE = "en"
+WHISPER_BEAM_SIZE = 10
+WHISPER_VAD_FILTER = True
 WHISPER_INITIAL_PROMPT = (
     "Interview question about software engineering, data structures, algorithms, system design, "
     "computer science, IT companies, MNCs, TCS, Infosys, Wipro, Accenture, HCL, Cognizant, "
@@ -67,15 +76,15 @@ WHISPER_INITIAL_PROMPT = (
 )
 
 # --- Audio Settings ---
-SAMPLE_RATE       = 16000
-CHANNELS          = 1
-CHUNK_SIZE        = 1024
+SAMPLE_RATE = 16000
+CHANNELS = 1
+CHUNK_SIZE = 1024
 AUDIO_FORMAT_BYTES = 2
 
 # --- Queue sizes ---
-AUDIO_QUEUE_MAXSIZE      = 500
+AUDIO_QUEUE_MAXSIZE = 500
 TRANSCRIPT_QUEUE_MAXSIZE = 20
-ANSWER_QUEUE_MAXSIZE     = 20
+ANSWER_QUEUE_MAXSIZE = 20
 
 # --- Temp file ---
 TEMP_WAV_PATH = "temp_recording.wav"
